@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}数据契约 CI{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <span class="brand">📋 数据契约 CI</span>
+  <a class="navlink {{ 'active' if active == 'dashboard' }}" href="/">工作台</a>
+  <a class="navlink {{ 'active' if active == 'changes' }}" href="/changes">变更请求</a>
+  <a class="navlink {{ 'active' if active == 'rulesets' }}" href="/rulesets">质量规则集</a>
+  <a class="navlink {{ 'active' if active == 'graph' }}" href="/graph">依赖图</a>
+</nav>
+<main class="container">
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

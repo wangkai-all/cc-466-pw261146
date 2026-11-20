@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}变更请求 · 数据契约 CI{% endblock %}
+{% block content %}
+<h1>变更请求</h1>
+<p class="sub">所有契约变更的门禁检查结果</p>
+
+<div class="card">
+<table class="data">
+  <thead><tr><th>#</th><th>契约</th><th>标题</th><th>变更统计</th><th>门禁</th><th>状态</th><th>提交人</th><th>时间</th></tr></thead>
+  <tbody>
+  {% for c in changes %}
+  <tr>
+    <td class="mono"><a href="/changes/{{ c.id }}">#{{ c.id }}</a></td>
+    <td class="mono"><a href="/contracts/{{ c.contract_name }}">{{ c.contract_name }}</a></td>
+    <td>{{ c.title }}</td>
+    <td class="small">
+      {% if c.summary.by_severity.BREAKING %}<span class="badge badge-crit"><span class="icon">✗</span>{{ c.summary.by_severity.BREAKING }} 破坏</span>{% endif %}
+      {% if c.summary.by_severity.WARNING %}<span class="badge badge-warn"><span class="icon">⚠</span>{{ c.summary.by_severity.WARNING }} 审批</span>{% endif %}
+      {% if c.summary.by_severity.INFO %}<span class="badge badge-good"><span class="icon">✓</span>{{ c.summary.by_severity.INFO }} 兼容</span>{% endif %}
+    </td>
+    <td>
+      {% if c.gate_status == 'PASS' %}<span class="badge badge-good"><span class="icon">✓</span>通过</span>
+      {% elif c.gate_status == 'NEEDS_REVIEW' %}<span class="badge badge-warn"><span class="icon">⚠</span>需审批</span>
+      {% else %}<span class="badge badge-crit"><span class="icon">✗</span>阻塞</span>{% endif %}
+    </td>
+    <td>
+      {% if c.status == 'merged' %}
+        {% if c.auto_merged %}<span class="badge badge-good"><span class="icon">✓</span>自动合并</span>
+        {% else %}<span class="badge badge-info"><span class="icon">✓</span>已合并</span>{% endif %}
+      {% elif c.status == 'open' %}<span class="badge badge-neutral"><span class="icon">●</span>打开中</span>
+      {% else %}<span class="badge badge-neutral"><span class="icon">—</span>已关闭</span>{% endif %}
+    </td>
+    <td>{{ c.author }}</td>
+    <td class="muted small">{{ c.created_at[:19].replace('T', ' ') }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

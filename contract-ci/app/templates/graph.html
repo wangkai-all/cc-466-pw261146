@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}依赖图 · 数据契约 CI{% endblock %}
+{% block content %}
+<h1>全局依赖图</h1>
+<p class="sub">契约与下游依赖的完整拓扑。点击契约节点查看详情。</p>
+
+<div class="graph-wrap">
+  <div id="full-graph"></div>
+  <div class="graph-tooltip"></div>
+</div>
+<div class="legend">
+  <span class="item"><span class="swatch" style="background:var(--series-1)"></span>契约（圆角方块）</span>
+  <span class="item"><span class="swatch" style="background:var(--series-3)"></span>下游表（方块）</span>
+  <span class="item"><span class="swatch" style="background:var(--series-2)"></span>下游应用：看板 ◆ / 任务 ▲ / API ⬡</span>
+  <span class="item"><span class="line-sample"></span>高/中关键级别</span>
+  <span class="item"><span class="line-sample dashed"></span>低关键级别</span>
+</div>
+
+<h2>依赖明细（表格视图）</h2>
+<div class="card">
+<table class="data">
+  <thead><tr><th>来源契约</th><th>下游</th><th>关键级别</th></tr></thead>
+  <tbody>
+  {% for e in graph.edges %}
+  <tr>
+    <td class="mono"><a href="/contracts/{{ e.source }}">{{ e.source }}</a></td>
+    <td class="mono">{{ e.target }}</td>
+    <td>{% if e.criticality == 'high' %}<span class="badge badge-crit"><span class="icon">●</span>高</span>
+        {% elif e.criticality == 'medium' %}<span class="badge badge-warn"><span class="icon">●</span>中</span>
+        {% else %}<span class="badge badge-neutral"><span class="icon">●</span>低</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<script src="/static/graph.js"></script>
+<script>
+renderDepGraph(document.getElementById('full-graph'), {{ graph | tojson }}, {ariaLabel: '全局依赖图'});
+</script>
+{% endblock %}

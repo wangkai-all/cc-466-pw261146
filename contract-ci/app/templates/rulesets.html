@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}质量规则集 · 数据契约 CI{% endblock %}
+{% block content %}
+<h1>质量规则集</h1>
+<p class="sub">规则模板的版本管理与回退。回退会基于目标版本内容生成新的生效版本，历史版本全部保留。</p>
+
+{% for rs in rulesets %}
+<h2 class="mono">{{ rs.name }}</h2>
+<div class="grid-2">
+  <div class="card">
+    <ul class="timeline">
+      {% for v in rs.versions %}
+      <li class="{{ 'tl-active' if v.status == 'active' }}">
+        <span class="mono">v{{ v.version }}</span>
+        {% if v.status == 'active' %}<span class="badge badge-info"><span class="icon">●</span>生效中</span>
+        {% else %}<span class="badge badge-neutral"><span class="icon">○</span>已取代</span>{% endif %}
+        {% if v.rollback_of_version %}
+          <span class="badge badge-warn"><span class="icon">↩</span>回退自 v{{ v.rollback_of_version }}</span>
+        {% endif %}
+        <div class="small">{{ v.note }}</div>
+        <div class="tl-meta">{{ v.created_by }} · {{ v.created_at[:19].replace('T', ' ') }} · {{ v.rules | length }} 条规则</div>
+        {% if v.status != 'active' %}
+        <button class="btn btn-sm mt" data-rollback="{{ rs.name }}" data-vid="{{ v.id }}" data-v="{{ v.version }}">回退到此版本</button>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card">
+    {% set active = rs.versions | selectattr('status', 'equalto', 'active') | first %}
+    <h2 style="margin-top:0">当前生效：v{{ active.version }}</h2>
+    <table class="data">
+      <thead><tr><th>规则</th><th>类型</th><th>参数</th><th>级别</th></tr></thead>
+      <tbody>
+      {% for r in active.rules %}
+      <tr>
+        <td>{{ r.name }}</td>
+        <td class="mono">{{ r.rule_type }}</td>
+        <td class="mono small">{{ r.params | tojson }}</td>
+        <td>{% if r.severity == 'blocking' %}<span class="badge badge-crit"><span class="icon">■</span>阻断</span>
+            {% else %}<span class="badge badge-warn"><span class="icon">▲</span>告警</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+document.querySelectorAll('[data-rollback]').forEach(b => b.onclick = async () => {
+  const note = prompt(`将规则集「${b.dataset.rollback}」回退到 v${b.dataset.v}？\n可填写回退原因：`, '');
+  if (note === null) return;
+  const r = await fetch(`/api/rulesets/${b.dataset.rollback}/rollback`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({target_version_id: Number(b.dataset.vid), actor: '页面操作', note}),
+  });
+  if (r.ok) location.reload(); else { const d = await r.json(); alert(d.detail || '回退失败'); }
+});
+</script>
+{% endblock %}

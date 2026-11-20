@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}变更 #{{ cr.id }} · 数据契约 CI{% endblock %}
+
+{% macro sev_badge(sev) %}
+  {% if sev == 'BREAKING' %}<span class="badge badge-crit"><span class="icon">✗</span>破坏性</span>
+  {% elif sev == 'WARNING' %}<span class="badge badge-warn"><span class="icon">⚠</span>需审批</span>
+  {% else %}<span class="badge badge-good"><span class="icon">✓</span>兼容</span>{% endif %}
+{% endmacro %}
+
+{% macro oldnew(c) %}
+  {% if c.old is not none or c.new is not none %}
+  <div class="diff-oldnew">
+    {% if c.old is not none %}
+      <span class="old mono">{{ c.old if c.old is string else c.old | tojson }}</span>
+    {% endif %}
+    {% if c.new is not none %}
+      <span class="muted">→</span> <span class="new mono">{{ c.new if c.new is string else c.new | tojson }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<h1>变更 #{{ cr.id }} · {{ cr.title }}</h1>
+<p class="sub">契约 <a class="mono" href="/contracts/{{ cr.contract_name }}">{{ cr.contract_name }}</a>
+  · 提交人 {{ cr.author }} · {{ cr.created_at[:19].replace('T', ' ') }}
+  · 基线 <span class="mono">v{{ cr.base_version.version if cr.base_version else '?' }}</span></p>
+
+{# ---------- 门禁结果 ---------- #}
+{% set gs = cr.gate_status %}
+<div class="gate-banner {{ 'gate-pass' if gs == 'PASS' else 'gate-review' if gs == 'NEEDS_REVIEW' else 'gate-blocked' }}">
+  <div class="gate-title">
+    {% if gs == 'PASS' %}<span class="badge badge-good"><span class="icon">✓</span>门禁通过</span>
+    {% elif gs == 'NEEDS_REVIEW' %}<span class="badge badge-warn"><span class="icon">⚠</span>需人工审批</span>
+    {% else %}<span class="badge badge-crit"><span class="icon">✗</span>门禁阻塞</span>{% endif %}
+    <span>
+      {% if cr.status == 'merged' %}{{ '已自动合并' if cr.auto_merged else '已合并' }}{% if cr.merged_version %}（发布 <span class="mono">v{{ cr.merged_version }}</span>）{% endif %}
+      {% elif cr.status == 'rejected' %}已关闭
+      {% else %}打开中{% endif %}
+    </span>
+  </div>
+  <ul>
+    {% for r in cr.gate_detail.reasons %}<li>{{ r }}</li>{% endfor %}
+    {% if cr.status == 'open' %}
+      {% for r in cr.merge_reasons %}<li>合并条件：{{ r }}</li>{% endfor %}
+    {% endif %}
+  </ul>
+  {% if cr.status == 'open' %}
+  <div class="mt">
+    <button class="btn btn-primary" id="btn-merge" {{ '' if cr.merge_allowed else 'disabled' }}>合并变更</button>
+    <button class="btn" id="btn-close">关闭请求</button>
+  </div>
+  {% endif %}
+</div>
+
+{# ---------- 变更 diff ---------- #}
+<h2>变更 diff（{{ cr.summary.total }} 项：
+  {{ cr.summary.by_severity.BREAKING }} 破坏性 / {{ cr.summary.by_severity.WARNING }} 需审批 / {{ cr.summary.by_severity.INFO }} 兼容）</h2>
+{% for cat, label in [('field', '字段'), ('partition', '分区'), ('quality_rule', '质量规则'), ('dependency', '下游依赖')] %}
+  {% set items = cr.diff | selectattr('category', 'equalto', cat) | list %}
+  {% if items %}
+  <h2 style="font-size:14px">{{ label }}（{{ items | length }}）</h2>
+  <div class="diff-group">
+    {% for c in items %}
+    <div class="diff-item">
+      <span class="sev">{{ sev_badge(c.severity) }}</span>
+      <div class="msg">
+        <div>{{ c.message }}</div>
+        {{ oldnew(c) }}
+        <div class="path mono">{{ c.path }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endfor %}
+{% if not cr.diff %}<div class="card muted">无实质变更。</div>{% endif %}
+
+{# ---------- 影响报告 ---------- #}
+{% if cr.impact_report %}
+{% set ir = cr.impact_report %}
+<h2>影响报告</h2>
+<div class="card">
+  <div class="stat-row" style="margin-bottom:10px">
+    <div class="stat-tile">
+      <div class="stat-label">风险等级</div>
+      <div class="stat-value" style="font-size:22px">
+        {% if ir.risk_level == 'high' %}<span class="badge badge-crit"><span class="icon">▲</span>{{ ir.risk_label }}</span>
+        {% elif ir.risk_level == 'medium' %}<span class="badge badge-warn"><span class="icon">▲</span>{{ ir.risk_label }}</span>
+        {% else %}<span class="badge badge-good"><span class="icon">▲</span>{{ ir.risk_label }}</span>{% endif %}
+      </div>
+    </div>
+    <div class="stat-tile"><div class="stat-label">受影响下游</div><div class="stat-value">{{ ir.summary.affected_count }}</div>
+      <div class="stat-note">直接 {{ ir.summary.direct_count }} · 传递 {{ ir.summary.transitive_count }}</div></div>
+    <div class="stat-tile"><div class="stat-label">高关键级别</div><div class="stat-value">{{ ir.summary.high_criticality_count }}</div>
+      <div class="stat-note">需优先通知</div></div>
+    <div class="stat-tile"><div class="stat-label">破坏性变更</div><div class="stat-value">{{ ir.summary.breaking_count }}</div>
+      <div class="stat-note">项</div></div>
+  </div>
+
+  <div class="graph-wrap">
+    <div id="impact-graph"></div>
+    <div class="graph-tooltip"></div>
+  </div>
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--series-1)"></span>变更契约</span>
+    <span class="item"><span class="swatch" style="background:var(--series-3)"></span>下游表</span>
+    <span class="item"><span class="swatch" style="background:var(--series-2)"></span>下游应用（看板/任务/API）</span>
+    <span class="item"><span class="swatch" style="border:2px solid var(--status-critical);background:none"></span>变更源</span>
+    <span class="item"><span class="swatch" style="border:2px solid var(--status-warning);background:none"></span>受影响</span>
+  </div>
+
+  <table class="data mt">
+    <thead><tr><th>下游</th><th>团队</th><th>类型</th><th>关键级别</th><th>影响深度</th><th>依赖路径</th></tr></thead>
+    <tbody>
+    {% for a in ir.affected_downstreams %}
+    <tr>
+      <td class="mono">{{ a.name }}</td>
+      <td>{{ a.team }}</td>
+      <td>{{ a.kind }}</td>
+      <td>{% if a.criticality == 'high' %}<span class="badge badge-crit"><span class="icon">●</span>高</span>
+          {% elif a.criticality == 'medium' %}<span class="badge badge-warn"><span class="icon">●</span>中</span>
+          {% else %}<span class="badge badge-neutral"><span class="icon">●</span>低</span>{% endif %}</td>
+      <td>{{ '直接' if a.depth == 1 else '传递（' ~ a.depth ~ ' 层）' }}</td>
+      <td class="mono small muted">{{ a.path | join(' → ') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ---------- 迁移任务 ---------- #}
+{% if cr.tasks %}
+<h2>迁移任务（{{ cr.tasks | length }}）</h2>
+<div class="card">
+<table class="data">
+  <thead><tr><th>#</th><th>任务</th><th>负责团队</th><th>状态</th><th>操作</th></tr></thead>
+  <tbody>
+  {% for t in cr.tasks %}
+  <tr>
+    <td class="mono">{{ t.id }}</td>
+    <td>{{ t.title }}<div class="muted small">{{ t.description.split('\n')[0] }}</div></td>
+    <td>{{ t.assignee_team }}</td>
+    <td>
+      {% if t.status == 'done' %}<span class="badge badge-good"><span class="icon">✓</span>已完成</span>
+      {% elif t.status == 'in_progress' %}<span class="badge badge-warn"><span class="icon">●</span>进行中</span>
+      {% else %}<span class="badge badge-neutral"><span class="icon">○</span>待认领</span>{% endif %}
+    </td>
+    <td>
+      {% if cr.status == 'open' %}
+        {% if t.status == 'todo' %}<button class="btn btn-sm" data-task="{{ t.id }}" data-status="in_progress">认领</button>{% endif %}
+        {% if t.status != 'done' %}<button class="btn btn-sm" data-task="{{ t.id }}" data-status="done">完成</button>{% endif %}
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{# ---------- 审批记录 ---------- #}
+<h2>批准记录（{{ cr.approvals | length }}）</h2>
+<div class="grid-2">
+  <div class="card">
+    {% if cr.approvals %}
+    <ul class="timeline">
+      {% for a in cr.approvals %}
+      <li class="{{ 'tl-good' if a.decision == 'approve' else 'tl-crit' }}">
+        {% if a.decision == 'approve' %}<span class="badge badge-good"><span class="icon">✓</span>批准</span>
+        {% else %}<span class="badge badge-crit"><span class="icon">✗</span>驳回</span>{% endif %}
+        <strong>{{ a.approver }}</strong>
+        <span class="tag">{{ {'owner': '契约负责人', 'steward': '数据 Steward', 'downstream_owner': '下游负责人'}[a.role] }}</span>
+        {% if a.comment %}<div>{{ a.comment }}</div>{% endif %}
+        <div class="tl-meta">{{ a.created_at[:19].replace('T', ' ') }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<span class="muted">暂无审批记录。</span>{% endif %}
+  </div>
+  {% if cr.status == 'open' and cr.gate_status != 'PASS' %}
+  <div class="card">
+    <form id="approval-form">
+      <div class="form-row">
+        <div><label class="flabel">审批人</label><input type="text" id="ap-approver" required placeholder="姓名 / 工号"></div>
+        <div><label class="flabel">角色</label>
+          <select id="ap-role">
+            <option value="owner">契约负责人</option>
+            <option value="steward">数据 Steward</option>
+            <option value="downstream_owner">下游负责人</option>
+          </select>
+        </div>
+        <div><label class="flabel">结论</label>
+          <select id="ap-decision"><option value="approve">批准</option><option value="reject">驳回</option></select>
+        </div>
+      </div>
+      <label class="flabel">意见</label>
+      <input type="text" id="ap-comment" placeholder="审批意见（可选）" style="width:100%">
+      <div class="mt"><button class="btn btn-primary" type="submit">提交审批</button></div>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<script src="/static/graph.js"></script>
+<script>
+const CR_ID = {{ cr.id }};
+async function post(url, body) {
+  const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : null});
+  if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.detail || ('请求失败 ' + r.status)); return false; }
+  return true;
+}
+const btnMerge = document.getElementById('btn-merge');
+if (btnMerge) btnMerge.onclick = async () => { if (await post(`/api/changes/${CR_ID}/merge`)) location.reload(); };
+const btnClose = document.getElementById('btn-close');
+if (btnClose) btnClose.onclick = async () => { if (confirm('确认关闭该变更请求？') && await post(`/api/changes/${CR_ID}/close`)) location.reload(); };
+document.querySelectorAll('[data-task]').forEach(b => b.onclick = async () => {
+  const r = await fetch(`/api/tasks/${b.dataset.task}`, {method: 'PATCH',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: b.dataset.status})});
+  if (r.ok) location.reload(); else alert('任务更新失败');
+});
+const form = document.getElementById('approval-form');
+if (form) form.onsubmit = async (e) => {
+  e.preventDefault();
+  const ok = await post(`/api/changes/${CR_ID}/approvals`, {
+    approver: document.getElementById('ap-approver').value,
+    role: document.getElementById('ap-role').value,
+    decision: document.getElementById('ap-decision').value,
+    comment: document.getElementById('ap-comment').value,
+  });
+  if (ok) location.reload();
+};
+
+{% if cr.impact_report %}
+// 影响子图：由依赖路径重建边
+(function () {
+  const ir = {{ cr.impact_report | tojson }};
+  const nodes = [{name: ir.contract, kind: 'contract', owner: ''}];
+  const edges = [];
+  const seen = new Set([ir.contract]);
+  const edgeSeen = new Set();
+  ir.affected_downstreams.forEach(a => {
+    if (!seen.has(a.name)) { nodes.push({name: a.name, kind: a.kind, owner: a.team}); seen.add(a.name); }
+    for (let i = 0; i + 1 < a.path.length; i++) {
+      const key = a.path[i] + '→' + a.path[i + 1];
+      if (!edgeSeen.has(key)) {
+        edges.push({source: a.path[i], target: a.path[i + 1], criticality: a.criticality});
+        edgeSeen.add(key);
+      }
+    }
+  });
+  const affected = {};
+  ir.affected_downstreams.forEach(a => { affected[a.name] = a.depth; });
+  renderDepGraph(document.getElementById('impact-graph'), {nodes, edges},
+    {highlight: {source: ir.contract, affected}, ariaLabel: '影响范围图'});
+})();
+{% endif %}
+</script>
+{% endblock %}
